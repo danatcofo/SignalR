@@ -1,18 +1,21 @@
-﻿// Copyright (c) Microsoft Open Technologies, Inc. All rights reserved. See License.md in the project root for license information.
-
+﻿using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net.Http;
-using Microsoft.AspNet.SignalR.Client.Http;
+using System.Text;
 
-namespace Microsoft.AspNet.SignalR.Client.WinRT.Http
+namespace Microsoft.AspNet.SignalR.Client.Http
 {
     public class HttpResponseMessageWrapper : IResponse
     {
         private HttpResponseMessage _httpResponseMessage;
+        private HttpClient _client;
 
-        public HttpResponseMessageWrapper(HttpResponseMessage httpResponseMessage)
+        public HttpResponseMessageWrapper(HttpResponseMessage httpResponseMessage, HttpClient client)
         {
             _httpResponseMessage = httpResponseMessage;
+            _client = client;
         }
 
         public string ReadAsString()
@@ -30,6 +33,7 @@ namespace Microsoft.AspNet.SignalR.Client.WinRT.Http
             if (disposing)
             {
                 _httpResponseMessage.Dispose();
+                _client.Dispose();
             }
         }
 
