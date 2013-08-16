@@ -19,10 +19,12 @@ namespace Microsoft.AspNet.SignalR.ServiceBus
     {
         private const string SignalRTopicPrefix = "SIGNALR_TOPIC";
 
-        private readonly ServiceBusSubscription _subscription;
+        private ServiceBusSubscription _subscription;
         private readonly ServiceBusConnection _connection;
         private readonly string[] _topics;
-        
+        private readonly TimeSpan _retryDelay = TimeSpan.FromSeconds(2);
+        private readonly TraceSource _trace;
+
         public ServiceBusMessageBus(IDependencyResolver resolver, ServiceBusScaleoutConfiguration configuration)
             : base(resolver, configuration)
         {
@@ -33,20 +35,59 @@ namespace Microsoft.AspNet.SignalR.ServiceBus
 
             // Retrieve the trace manager
             var traceManager = resolver.Resolve<ITraceManager>();
-            TraceSource trace = traceManager["SignalR." + typeof(ServiceBusMessageBus).Name];
+            _trace = traceManager["SignalR." + typeof(ServiceBusMessageBus).Name];
 
-            _connection = new ServiceBusConnection(configuration, trace);
+            _connection = new ServiceBusConnection(configuration, _trace);
 
             _topics = Enumerable.Range(0, configuration.TopicCount)
                                 .Select(topicIndex => SignalRTopicPrefix + "_" + configuration.TopicPrefix + "_" + topicIndex)
                                 .ToArray();
 
-            _subscription = _connection.Subscribe(_topics, OnMessage, OnError);
+            SubscribeWithRetry(configuration.TopicCount);
+        }
 
-            // Open the streams after creating the subscription
-            for (int i = 0; i < configuration.TopicCount; i++)
+        private void SubscribeWithRetry(int topicCount)
+        {
+            Task subscribeTask = SubscribeToServiceBus();
+
+            subscribeTask.ContinueWith(task =>
             {
-                Open(i);
+                if (task.IsFaulted && !task.Exception.InnerExceptions.Any(i => i is MessagingEntityAlreadyExistsException))
+                {
+                    if (task.Exception.InnerExceptions.Any(i => i is UnauthorizedAccessException))
+                        return;
+                    if (task.Exception.InnerExceptions.Any(i => i is QuotaExceededException))
+                        return;
+                    TaskAsyncHelper.Delay(_retryDelay)
+                                   .Then(bus => bus.SubscribeWithRetry(topicCount), this);
+                }
+                else
+                {
+                    _connection.ProcessReceivers(OnMessage, OnError);
+
+                    // Open the streams after creating the subscription
+                    for (int i = 0; i < topicCount; i++)
+                    {
+                        Open(i);
+                    }
+                }
+            },
+            TaskContinuationOptions.ExecuteSynchronously);
+        }
+
+        private Task SubscribeToServiceBus()
+        {
+            try
+            {
+                _subscription = _connection.Subscribe(_topics, OnMessage, OnError);
+
+                return TaskAsyncHelper.Empty;
+            }
+            catch (Exception ex)
+            {
+                _trace.TraceError("Error Subscribe to ServiceBus - " + ex.GetBaseException());
+
+                return TaskAsyncHelper.FromError(ex);
             }
         }
 
@@ -62,7 +103,12 @@ namespace Microsoft.AspNet.SignalR.ServiceBus
         {
             var stream = ServiceBusMessage.ToStream(messages);
 
-            return _subscription.Publish(streamIndex, stream);
+            return _subscription.Publish(streamIndex, stream).Catch(exception =>
+            {
+                // re-up subscription
+                if (exception.InnerExceptions.Any(i => i is MessagingEntityNotFoundException))
+                    SubscribeWithRetry(_topics.Length);
+            });
         }
 
         private void OnMessage(int topicIndex, IEnumerable<BrokeredMessage> messages)
