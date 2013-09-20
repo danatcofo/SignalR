@@ -65,7 +65,10 @@ namespace Microsoft.AspNet.SignalR.ServiceBus
                     {
                         _trace.TraceInformation("Creating a new topic {0} in the service bus...", topicName);
 
-                        _namespaceManager.CreateTopic(topicName);
+                        var topic = new TopicDescription(topicName);
+                        topic.AutoDeleteOnIdle = TimeSpan.FromDays(2);
+
+                        _namespaceManager.CreateTopic(topic);
 
                         _trace.TraceInformation("Creation of a new topic {0} in the service bus completed successfully.", topicName);
                     }
@@ -81,8 +84,7 @@ namespace Microsoft.AspNet.SignalR.ServiceBus
 
                 _trace.TraceInformation("Creation of a new topic client {0} completed successfully.", topicName);
 
-                // Create a random subscription
-                string subscriptionName = Guid.NewGuid().ToString();
+                string subscriptionName = _configuration.SubscriptionName;
 
                 try
                 {

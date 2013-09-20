@@ -12,7 +12,7 @@ namespace Microsoft.AspNet.SignalR
     {
         private int _topicCount;
 
-        public ServiceBusScaleoutConfiguration(string connectionString, string topicPrefix)
+        public ServiceBusScaleoutConfiguration(string connectionString, string topicPrefix, string subscriptionName = null)
         {
             if (String.IsNullOrEmpty(connectionString))
             {
@@ -24,10 +24,16 @@ namespace Microsoft.AspNet.SignalR
                 throw new ArgumentNullException("topicPrefix");
             }
 
+            if (string.IsNullOrEmpty(subscriptionName))
+            {
+                subscriptionName = Guid.NewGuid().ToString();
+            }
+
             ConnectionString = connectionString;
             TopicPrefix = topicPrefix;
             TopicCount = 1;
             TimeToLive = TimeSpan.FromMinutes(1);
+            SubscriptionName = subscriptionName;
         }
 
         /// <summary>
@@ -40,6 +46,13 @@ namespace Microsoft.AspNet.SignalR
         /// This must be consistent between all nodes in the web farm.
         /// </summary>
         public string TopicPrefix { get; private set; }
+
+
+        /// <summary>
+        /// The subscription name that this instance will use.  Typically represents an instance identifier of the app
+        /// This should be different between all nodes in the web farm.
+        /// </summary>
+        public string SubscriptionName { get; private set; }
 
         /// <summary>
         /// The number of topics to send messages over. Using more topics reduces contention and may increase throughput.
